@@ -1,0 +1,18 @@
+<?php
+
+/**
+ * @file
+ * Install and Uninstall processes for age checker.
+ */
+
+use Drupal\Core\Url;
+use Drupal\Core\Link;
+
+/**
+ * Create tables on install.
+ */
+function age_checker_install() {
+  $url = Url::fromRoute('age_checker.admin_config')->toString();
+  $link = Link::fromTextAndUrl(t('Age checker setting page'), $url);
+  \Drupal::messenger()->addMessage(t('Please save default values in configuration settings. To configure your Age checker go to the %link.', array('%link' => $link)));
+}

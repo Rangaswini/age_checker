@@ -1,0 +1,14 @@
+age_checker.admin_config:
+  route_name: age_checker.admin_config
+  title: General Settings
+  base_route: age_checker.admin_config
+
+age_checker.mapping:
+  route_name: age_checker.mapping
+  title: Language and Country Mapping
+  base_route: age_checker.admin_config
+
+age_checker.country_config:
+  route_name: age_checker.country_config
+  title: Country Configuration
+  base_route: age_checker.admin_config

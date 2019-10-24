@@ -1,0 +1,982 @@
+diff --git a/age_checker.install b/age_checker.install
+index 39ab649..8631660 100644
+--- a/age_checker.install
++++ b/age_checker.install
+@@ -6,12 +6,13 @@
+  */
+ 
+ use Drupal\Core\Url;
++use Drupal\Core\Link;
+ 
+ /**
+  * Create tables on install.
+  */
+ function age_checker_install() {
+-  $url = Url::fromRoute('age_checker.admin_config');
+-  $link = \Drupal::l(t('Age checker setting page'), $url);
+-  drupal_set_message(t('Please save default values in configuration settings. To configure your Age checker go to the %link.', array('%link' => $link)));
++  $url = Url::fromRoute('age_checker.admin_config')->toString();
++  $link = Link::fromTextAndUrl(t('Age checker setting page'), $url)->toString();
++  \Drupal::messenger()->addMessage(t('Please save default values in configuration settings. To configure your Age checker go to the %link.', array('%link' => $link)));
+ }
+diff --git a/age_checker.module b/age_checker.module
+index ebb8f69..a185d1c 100644
+--- a/age_checker.module
++++ b/age_checker.module
+@@ -126,7 +126,7 @@ function age_checker_page_attachments(array &$attachments) {
+         if ($verify) {
+           if ($current_path != '/age-gate') {
+             if (!function_exists('drush_main')) {
+-              $url = Drupal::url('age_checker.agegate');
++              $url = Url::fromRoute('age_checker.agegate')->toString();
+               $response = new RedirectResponse($url);
+               $response->send();
+               return;
+@@ -204,7 +204,7 @@ function age_checker_page_attachments(array &$attachments) {
+  * Get the country name for Age Gate.
+  */
+ function age_checker_get_country_name() {
+-
++   $country_name = '';
+   // Get the country code.
+   $country_code = age_checker_get_country_code();
+   // Get the default country.
+diff --git a/age_checker.services.yml b/age_checker.services.yml
+index 53ac2af..1e12c73 100644
+--- a/age_checker.services.yml
++++ b/age_checker.services.yml
+@@ -1,5 +1,6 @@
+ services:
+   age_checker.subscriber:
+     class: Drupal\age_checker\EventSubscriber\AgeCheckerSubscriber
++    arguments: ['@current_user']
+     tags:
+-      - { name: 'event_subscriber' }
++      - { name: 'event_subscriber' }
+\ No newline at end of file
+diff --git a/src/Controller/AgeCheckerAgeGate.php b/src/Controller/AgeCheckerAgeGate.php
+index c7cbf16..2b59289 100644
+--- a/src/Controller/AgeCheckerAgeGate.php
++++ b/src/Controller/AgeCheckerAgeGate.php
+@@ -3,6 +3,9 @@
+ namespace Drupal\age_checker\Controller;
+ 
+ use Drupal\Core\Controller\ControllerBase;
++use Drupal\Core\Form\FormBuilderInterface;
++use Drupal\workflows\StateInterface;
++use Symfony\Component\DependencyInjection\ContainerInterface;
+ 
+ /**
+  * Class AgeCheckerAgeGate.
+@@ -11,6 +14,41 @@ use Drupal\Core\Controller\ControllerBase;
+  */
+ class AgeCheckerAgeGate extends ControllerBase {
+ 
++  /**
++   * The module handler service.
++   *
++   * @var \Drupal\Core\Form\FormBuilderInterface
++   */
++  protected $formBuilder;
++
++  /**
++   * The state service.
++   *
++   * @var \Drupal\Core\State\StateInterface
++   */
++  protected $state;
++
++  /**
++   * Constructs a AgeCheckerAgeGate object
++   *
++   * @param \Drupal\Core\Form\FormBuilderInterface $formBuilder
++   * @param \Drupal\workflows\StateInterface $state
++   */
++  public function __construct(FormBuilderInterface $formBuilder, StateInterface $state) {
++    $this->formBuilder = $formBuilder;
++    $this->state = $state;
++  }
++
++  /**
++   * {@inheritdoc}
++   */
++  public static function create(ContainerInterface $container) {
++    return new static(
++      $container->get('form_builder'),
++      $container->get('state')
++    );
++  }
++
+   /**
+    * Function ageCheckerTemplate.
+    */
+@@ -20,15 +58,14 @@ class AgeCheckerAgeGate extends ControllerBase {
+     $language_code = $this->ageCheckerGetLanguageCode();
+ 
+     // Header text of the form.
+-    $age_checker_header_message_array = \Drupal::state()
+-      ->get('age_checker_' . $language_code . '_age_gate_header');
++    $age_checker_header_message_array = $this->state->get('age_checker_' . $language_code . '_age_gate_header');
+     $age_checker_header_message = $age_checker_header_message_array['value'];
+ 
+     // Form Element.
+-    $age_checker_form = \Drupal::formBuilder()->getForm('\Drupal\age_checker\Form\AgeCheckerForm');
++    $age_checker_form = $this->formBuilder->getForm('\Drupal\age_checker\Form\AgeCheckerForm');
+ 
+     // Footer text of the form.
+-    $age_checker_footer_message_array = \Drupal::state()->get('age_checker_' . $language_code . '_age_gate_footer');
++    $age_checker_footer_message_array = $this->state->get('age_checker_' . $language_code . '_age_gate_footer');
+     $age_checker_footer_message = $age_checker_footer_message_array['value'];
+ 
+     return array(
+diff --git a/src/EventSubscriber/AgeCheckerSubscriber.php b/src/EventSubscriber/AgeCheckerSubscriber.php
+index 514a964..b3a3bce 100644
+--- a/src/EventSubscriber/AgeCheckerSubscriber.php
++++ b/src/EventSubscriber/AgeCheckerSubscriber.php
+@@ -2,24 +2,41 @@
+ 
+ namespace Drupal\age_checker\EventSubscriber;
+ 
++use Drupal\Core\Session\AccountInterface;
+ use Symfony\Component\HttpKernel\KernelEvents;
+ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+-use Drupal\Component\Utility\Unicode;
++
+ 
+ /**
+  * Provides an AgeCheckerSubscriber.
+  */
+ class AgeCheckerSubscriber implements EventSubscriberInterface {
+ 
++  /**
++   * The current user.
++   *
++   * @var \Drupal\Core\Session\AccountInterface
++   */
++  protected $currentUser;
++
++  /**
++   * Constructs an AnonymousUserResponseSubscriber object.
++   *
++   * @param \Drupal\Core\Session\AccountInterface $current_user
++   *   The current user.
++   */
++  public function __construct(AccountInterface $current_user) {
++    $this->currentUser = $current_user;
++  }
++
+   /**
+    * The Event to process.
+    */
+   public function ageCheckerSubscriberLoad() {
+-    $user = \Drupal::currentUser();
+     $age_gate_cookie = isset($_COOKIE['age_checker']) ? $_COOKIE['age_checker'] : 0;
+     $remember_me_cookie = isset($_COOKIE['remember_me']) ? $_COOKIE['remember_me'] : 0;
+ 
+-    if ($user->id() > 0) {
++    if ($this->currentUser->id() > 0) {
+       setcookie('age_checker', 1, 0, $GLOBALS['base_path'], NULL, FALSE, TRUE);
+     }
+     else {
+@@ -46,16 +63,17 @@ class AgeCheckerSubscriber implements EventSubscriberInterface {
+    *   True if must be shown
+    */
+   public static function ageCheckerShowAgeGate() {
++    $age_checker_visibility = null;
+     $visibility = \Drupal::state()->get('age_checker_visibility', AGE_CHECKER_VISIBILITY_NOTLISTED);
+     $pages = \Drupal::state()->get('age_checker_pages');
+     $current_path = \Drupal::service('path.current')->getPath();
+ 
+     // Convert path to lowercase.
+-    $pages = Unicode::strtolower($pages);
++    $pages = mb_strtolower($pages);
+     if ($visibility < 2) {
+       // Convert the Drupal path to lowercase.
+       $path_alias = \Drupal::service('path.alias_manager')->getAliasByPath($current_path);
+-      $path = Unicode::strtolower($path_alias);
++      $path = mb_strtolower($path_alias);
+       // Compare the lowercase internal and lowercase path alias (if any).
+       $age_checker_visibility = \Drupal::service('path.matcher')->matchPath($path, $pages);
+ 
+diff --git a/src/Form/AgeCheckerForm.php b/src/Form/AgeCheckerForm.php
+index 4eaf0d6..9c67093 100644
+--- a/src/Form/AgeCheckerForm.php
++++ b/src/Form/AgeCheckerForm.php
+@@ -2,15 +2,48 @@
+ 
+ namespace Drupal\age_checker\Form;
+ 
++use Drupal\Core\Config\ConfigFactoryInterface;
+ use Drupal\Core\Form\FormBase;
+ use Drupal\Core\Form\FormStateInterface;
+ use Drupal\age_checker\Controller\AgeCheckerAgeGate;
++use Drupal\Core\State\StateInterface;
++use Symfony\Component\DependencyInjection\ContainerInterface;
+ 
+ /**
+  * Implements an AgeChecker form.
+  */
+ class AgeCheckerForm extends FormBase {
+ 
++  /** The Key/Value Store to use for state.
++   *
++   * @var \Drupal\Core\State\StateInterface
++   * @var \Drupal\Core\Config\ConfigFactoryInterface
++   */
++
++  protected  $configFactory;
++  protected $state;
++
++  /**
++   * Constructs \Drupal\tint\Plugin\Derivative\TintEmbedBlockDerivative object.
++   *
++   * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
++   *   The config factory.
++   * @param \Drupal\Core\State\StateInterface $state
++   *   The state keyvalue store.
++   */
++
++  public function __construct(ConfigFactoryInterface $configFactory, StateInterface $state) {
++    $this->configFactory = $configFactory->get('age_checker.settings');
++    $this->state = $state;
++  }
++
++  public static function create(ContainerInterface $container) {
++    return new static(
++      $container->get('config.factory'),
++      $container->get('state')
++    );
++  }
++
+   /**
+    * {@inheritdoc}
+    */
+@@ -23,14 +56,13 @@ class AgeCheckerForm extends FormBase {
+    */
+   public function buildForm(array $form, FormStateInterface $form_state) {
+     $form = array();
++    $result = [];
+     // Getting the langauge_code.
+     $language_code = AgeCheckerAgeGate::ageCheckerGetLanguageCode();
+-
+     // Default Country.
+     $selected_country = isset($_COOKIE['country_selected']) ? $_COOKIE['country_selected'] : age_checker_get_country_name();
+-
+     // Country list.
+-    $countries = \Drupal::state()->get('age_checker_countries') ? (\Drupal::state()->get('age_checker_countries')) : \Drupal::config('age_checker.settings')->get('age_checker_countries');
++    $countries = $this->state->get('age_checker_countries') ? ($this->state->get('age_checker_countries')) : $this->configFactory->get('age_checker_countries');
+     $countries = explode("\n", $countries);
+     foreach ($countries as $country) {
+       $country = explode('|', $country);
+@@ -40,7 +72,7 @@ class AgeCheckerForm extends FormBase {
+     if (count($result) > 1) {
+       $form['list_of_countries'] = array(
+         '#type' => 'select',
+-        '#title' => \Drupal::state()->get('age_checker_' . $language_code . '_select_list_label'),
++        '#title' => $this->state->get('age_checker_' . $language_code . '_select_list_label'),
+         '#options' => $result,
+         '#weight' => -1,
+         '#id' => 'age_checker_country',
+@@ -63,12 +95,12 @@ class AgeCheckerForm extends FormBase {
+       '#size' => 2,
+       '#maxlength' => 2,
+       '#id' => 'age_checker_day',
+-      '#weight' => \Drupal::state()->get('age_checker_' . $selected_country . '_day_weight'),
++      '#weight' => $this->state->get('age_checker_' . $selected_country . '_day_weight'),
+       '#required' => TRUE,
+       '#attributes' => array(
+         'pattern' => "[0-9]*",
+-        'tabindex' => \Drupal::state()->get('age_checker_' . $selected_country . '_day_weight'),
+-        'placeholder' => \Drupal::state()->get('age_checker_' . $selected_country . '_day_placeholder'),
++        'tabindex' => $this->state->get('age_checker_' . $selected_country . '_day_weight'),
++        'placeholder' => $this->state->get('age_checker_' . $selected_country . '_day_placeholder'),
+       ),
+     );
+ 
+@@ -79,11 +111,11 @@ class AgeCheckerForm extends FormBase {
+       '#maxlength' => 2,
+       '#id' => 'age_checker_month',
+       '#required' => TRUE,
+-      '#weight' => \Drupal::state()->get('age_checker_' . $selected_country . '_month_weight'),
++      '#weight' => $this->state->get('age_checker_' . $selected_country . '_month_weight'),
+       '#attributes' => array(
+         'pattern' => "[0-9]*",
+-        'tabindex' => \Drupal::state()->get('age_checker_' . $selected_country . '_month_weight'),
+-        'placeholder' => \Drupal::state()->get('age_checker_' . $selected_country . '_month_placeholder'),
++        'tabindex' => $this->state->get('age_checker_' . $selected_country . '_month_weight'),
++        'placeholder' => $this->state->get('age_checker_' . $selected_country . '_month_placeholder'),
+       ),
+     );
+ 
+@@ -93,23 +125,23 @@ class AgeCheckerForm extends FormBase {
+       '#size' => 4,
+       '#maxlength' => 4,
+       '#id' => 'age_checker_year',
+-      '#weight' => \Drupal::state()->get('age_checker_' . $selected_country . '_year_weight'),
++      '#weight' => $this->state->get('age_checker_' . $selected_country . '_year_weight'),
+       '#required' => TRUE,
+       '#attributes' => array(
+         'pattern' => "[0-9]*",
+-        'tabindex' => \Drupal::state()->get('age_checker_' . $selected_country . '_year_weight'),
+-        'placeholder' => \Drupal::state()->get('age_checker_' . $selected_country . '_year_placeholder'),
++        'tabindex' => $this->state->get('age_checker_' . $selected_country . '_year_weight'),
++        'placeholder' => $this->state->get('age_checker_' . $selected_country . '_year_placeholder'),
+       ),
+     );
+ 
+     // Remember Me Checkbox.
+-    $option_remember_me = \Drupal::state()->get('age_checker_option_remember_me');
++    $option_remember_me = $this->state->get('age_checker_option_remember_me');
+     if ($option_remember_me == 1) {
+       $form['remember_me'] = array(
+         '#type' => 'checkbox',
+         '#weight' => 5,
+         '#id' => 'age_checker_remember_me',
+-        '#title' => \Drupal::state()->get('age_checker_' . $language_code . '_remember_me_text'),
++        '#title' => $this->state->get('age_checker_' . $language_code . '_remember_me_text'),
+         '#default_value' => 0,
+         '#attributes' => array(
+           'tabindex' => '5',
+@@ -120,7 +152,7 @@ class AgeCheckerForm extends FormBase {
+     // Submit button.
+     $form['submit'] = array(
+       '#type' => 'submit',
+-      '#value' => \Drupal::state()->get('age_checker_' . $language_code . '_button_text'),
++      '#value' => $this->state->get('age_checker_' . $language_code . '_button_text'),
+       '#weight' => 6,
+       '#attributes' => array(
+         'onclick' => "age_checker.verify();",
+diff --git a/src/Form/CountryConfig.php b/src/Form/CountryConfig.php
+index 3b8d889..4921e08 100644
+--- a/src/Form/CountryConfig.php
++++ b/src/Form/CountryConfig.php
+@@ -2,8 +2,12 @@
+ 
+ namespace Drupal\age_checker\Form;
+ 
++use Drupal\Core\Config\ConfigFactoryInterface;
++use Drupal\Core\Extension\ModuleHandlerInterface;
+ use Drupal\Core\Form\ConfigFormBase;
+ use Drupal\Core\Form\FormStateInterface;
++use Drupal\Core\State\StateInterface;
++use Symfony\Component\DependencyInjection\ContainerInterface;
+ 
+ /**
+  * Class CountryConfig.
+@@ -12,6 +16,45 @@ use Drupal\Core\Form\FormStateInterface;
+  */
+ class CountryConfig extends ConfigFormBase {
+ 
++  /** The Key/Value Store to use for state.
++   *
++   * @var \Drupal\Core\State\StateInterface
++   * @var \Drupal\Core\Config\ConfigFactoryInterface
++   * @var \Drupal\Core\File\Exception\ModuleHandlerInterface
++   */
++
++  /**
++   * The module handler service.
++   *
++   * @var \Drupal\Core\Extension\ModuleHandlerInterface
++   */
++
++  protected $state;
++  protected $moduleHandler;
++
++  /**
++   * Constructs \Drupal\tint\Plugin\Derivative\TintEmbedBlockDerivative object.
++   *
++   * @param \Drupal\Core\Config\ConfigFactoryInterface $config_factory
++   * @param \Drupal\Core\State\StateInterface $state
++   *   The state keyvalue store.
++   * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
++   */
++
++  public function __construct(ConfigFactoryInterface $config_factory, StateInterface $state, ModuleHandlerInterface $moduleHandler) {
++    parent::__construct($config_factory);
++    $this->state = $state;
++    $this->moduleHandler = $moduleHandler;
++  }
++
++  public static function create(ContainerInterface $container) {
++    return new static(
++      $container->get('config.factory'),
++      $container->get('state'),
++      $container->get('module_handler')
++    );
++  }
++
+   /**
+    * {@inheritdoc}
+    */
+@@ -32,16 +75,16 @@ class CountryConfig extends ConfigFormBase {
+    * {@inheritdoc}
+    */
+   public function buildForm(array $form, FormStateInterface $form_state) {
++    $country_list = [];
+ 
+     $config = $this->config('age_checker_country.settings');
+-    $default_settings = \Drupal::config('age_checker.settings');
+     global $base_url;
+ 
+     $country_options = array();
+-    $countries = \Drupal::state()->get('age_checker_countries', '') ? \Drupal::state()->get('age_checker_countries', '') : $default_settings->get('age_checker_countries');
++    $countries = $this->state->get('age_checker_countries', '') ? $this->state->get('age_checker_countries', '') : $config->get('age_checker_countries');
+     $countries = explode("\n", $countries);
+     foreach ($countries as $country) {
+-      if (isset($country)) {
++      if (!empty($country)) {
+         $country_array = explode('|', $country);
+         if (isset($country_array[1])) {
+           $country_options[$country_array[0]] = $country_array[1];
+@@ -77,10 +120,9 @@ class CountryConfig extends ConfigFormBase {
+         '#prefix' => '<div class="container-inline">',
+         '#suffix' => '</div>',
+         '#title' => $country_array[1],
+-        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_threshold_ages') ? $config->get('age_checker_' . $country_array[0] . '_threshold_ages') : $default_settings->get('age_checker_threshold_ages'),
++        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_threshold_ages') ? $config->get('age_checker_' . $country_array[0] . '_threshold_ages') : $config->get('age_checker_threshold_ages'),
+         '#type' => 'textfield',
+         '#size' => 3,
+-        '#element_validate' => array('element_validate_integer'),
+       );
+     }
+ 
+@@ -91,7 +133,6 @@ class CountryConfig extends ConfigFormBase {
+       '#collapsible' => TRUE,
+       '#collapsed' => FALSE,
+     );
+-
+     foreach ($countries as $country) {
+       $country_array = explode('|', $country);
+       $country_array = array_map('trim', $country_array);
+@@ -103,7 +144,7 @@ class CountryConfig extends ConfigFormBase {
+       );
+ 
+       // Link for Multilingual site.
+-      if (\Drupal::moduleHandler()->moduleExists('locale')) {
++      if ($this->moduleHandler->moduleExists('locale')) {
+         // Fieldset for Changing the Date format.
+         $form['country_specific'][$country_array[0]]['multilingual'] = array(
+           '#title' => t('Redirect links after age gate.'),
+@@ -132,10 +173,9 @@ class CountryConfig extends ConfigFormBase {
+         '#title' => t('Weight of Day Field :'),
+         '#prefix' => '<div class="container-inline">',
+         '#suffix' => '</div>',
+-        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_day_weight') ? $config->get('age_checker_' . $country_array[0] . '_day_weight') : $default_settings->get('age_checker_day_weight'),
++        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_day_weight') ? $config->get('age_checker_' . $country_array[0] . '_day_weight') : $config->get('age_checker_day_weight'),
+         '#type' => 'textfield',
+         '#size' => 1,
+-        '#element_validate' => array('element_validate_integer'),
+       );
+ 
+       // Changing the weight of Month field.
+@@ -143,20 +183,18 @@ class CountryConfig extends ConfigFormBase {
+         '#title' => t('Weight of Month Field :'),
+         '#prefix' => '<div class="container-inline">',
+         '#suffix' => '</div>',
+-        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_month_weight') ? $config->get('age_checker_' . $country_array[0] . '_month_weight') : $default_settings->get('age_checker_month_weight'),
++        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_month_weight') ? $config->get('age_checker_' . $country_array[0] . '_month_weight') : $config->get('age_checker_month_weight'),
+         '#type' => 'textfield',
+         '#size' => 1,
+-        '#element_validate' => array('element_validate_integer'),
+       );
+       // Changing the weight of Year field.
+       $form['country_specific'][$country_array[0]]['weight']['age_checker_' . $country_array[0] . '_year_weight'] = array(
+         '#title' => t('Weight of Year field :'),
+         '#prefix' => '<div class="container-inline">',
+         '#suffix' => '</div>',
+-        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_year_weight') ? $config->get('age_checker_' . $country_array[0] . '_year_weight') : $default_settings->get('age_checker_year_weight'),
++        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_year_weight') ? $config->get('age_checker_' . $country_array[0] . '_year_weight') : $config->get('age_checker_year_weight'),
+         '#type' => 'textfield',
+         '#size' => 1,
+-        '#element_validate' => array('element_validate_integer'),
+       );
+ 
+       // Fieldset for Changing the Placeholder.
+@@ -175,7 +213,7 @@ class CountryConfig extends ConfigFormBase {
+         '#required' => FALSE,
+         '#size' => 2,
+         '#maxlength' => 2,
+-        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_day_placeholder') ? $config->get('age_checker_' . $country_array[0] . '_day_placeholder') : $default_settings->get('age_checker_day_placeholder'),
++        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_day_placeholder') ? $config->get('age_checker_' . $country_array[0] . '_day_placeholder') : $config->get('age_checker_day_placeholder'),
+       );
+       // Placeholder for Month format.
+       $form['country_specific'][$country_array[0]]['placeholder']['age_checker_' . $country_array[0] . '_month_placeholder'] = array(
+@@ -186,7 +224,7 @@ class CountryConfig extends ConfigFormBase {
+         '#required' => FALSE,
+         '#size' => 2,
+         '#maxlength' => 2,
+-        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_month_placeholder') ? $config->get('age_checker_' . $country_array[0] . '_month_placeholder') : $default_settings->get('age_checker_month_placeholder'),
++        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_month_placeholder') ? $config->get('age_checker_' . $country_array[0] . '_month_placeholder') : $config->get('age_checker_month_placeholder'),
+       );
+       // Placeholder for Year format.
+       $form['country_specific'][$country_array[0]]['placeholder']['age_checker_' . $country_array[0] . '_year_placeholder'] = array(
+@@ -197,7 +235,7 @@ class CountryConfig extends ConfigFormBase {
+         '#required' => FALSE,
+         '#size' => 4,
+         '#maxlength' => 4,
+-        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_year_placeholder') ? $config->get('age_checker_' . $country_array[0] . '_year_placeholder') : $default_settings->get('age_checker_year_placeholder') ,
++        '#default_value' => $config->get('age_checker_' . $country_array[0] . '_year_placeholder') ? $config->get('age_checker_' . $country_array[0] . '_year_placeholder') : $config->get('age_checker_year_placeholder') ,
+       );
+     }
+ 
+@@ -206,25 +244,28 @@ class CountryConfig extends ConfigFormBase {
+ 
+   /**
+    * Implements hook_form_submit().
++   *
++   * @param array $form
++   * @param \Drupal\Core\Form\FormStateInterface $form_state
+    */
+   public function submitForm(array &$form, FormStateInterface $form_state) {
+     // Set values in variables.
+     $values = $form_state->getValues();
+ 
+-    $countries = \Drupal::state()->get('age_checker_countries', '') ? \Drupal::state()->get('age_checker_countries') : \Drupal::config('age_checker.settings')->get('age_checker_countries');
++    $countries = $this->state->get('age_checker_countries', '') ? $this->state->get('age_checker_countries') : $this->configFactory->get('age_checker_countries');
+     $countries = explode("\n", $countries);
+     foreach ($countries as $country) {
+       $country_array = explode('|', $country);
+       $country_array = array_map('trim', $country_array);
+ 
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_threshold_ages', $values['age_checker_' . $country_array[0] . '_threshold_ages']);
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_redirect_link', $values['age_checker_' . $country_array[0] . '_redirect_link']);
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_day_weight', $values['age_checker_' . $country_array[0] . '_day_weight']);
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_month_weight', $values['age_checker_' . $country_array[0] . '_month_weight']);
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_year_weight', $values['age_checker_' . $country_array[0] . '_year_weight']);
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_day_placeholder', $values['age_checker_' . $country_array[0] . '_day_placeholder']);
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_month_placeholder', $values['age_checker_' . $country_array[0] . '_month_placeholder']);
+-      \Drupal::state()->set('age_checker_' . $country_array[0] . '_year_placeholder', $values['age_checker_' . $country_array[0] . '_year_placeholder']);
++      $this->state->set('age_checker_' . $country_array[0] . '_threshold_ages', $values['age_checker_' . $country_array[0] . '_threshold_ages']);
++      $this->state->set('age_checker_' . $country_array[0] . '_redirect_link', $values['age_checker_' . $country_array[0] . '_redirect_link']);
++      $this->state->set('age_checker_' . $country_array[0] . '_day_weight', $values['age_checker_' . $country_array[0] . '_day_weight']);
++      $this->state->set('age_checker_' . $country_array[0] . '_month_weight', $values['age_checker_' . $country_array[0] . '_month_weight']);
++      $this->state->set('age_checker_' . $country_array[0] . '_year_weight', $values['age_checker_' . $country_array[0] . '_year_weight']);
++      $this->state->set('age_checker_' . $country_array[0] . '_day_placeholder', $values['age_checker_' . $country_array[0] . '_day_placeholder']);
++      $this->state->set('age_checker_' . $country_array[0] . '_month_placeholder', $values['age_checker_' . $country_array[0] . '_month_placeholder']);
++      $this->state->set('age_checker_' . $country_array[0] . '_year_placeholder', $values['age_checker_' . $country_array[0] . '_year_placeholder']);
+ 
+       $this->config('age_checker_country.settings')
+         ->set('age_checker_default_country', $form_state->getValues()['age_checker_default_country'])
+diff --git a/src/Form/MappingAdminForm.php b/src/Form/MappingAdminForm.php
+index 822031d..16c39c3 100644
+--- a/src/Form/MappingAdminForm.php
++++ b/src/Form/MappingAdminForm.php
+@@ -2,9 +2,12 @@
+ 
+ namespace Drupal\age_checker\Form;
+ 
++use Drupal\Core\Config\ConfigFactoryInterface;
+ use Drupal\Core\Form\ConfigFormBase;
+ use Drupal\Core\Form\FormStateInterface;
+ use Drupal\Component\Utility\Html;
++use Drupal\Core\State\StateInterface;
++use Symfony\Component\DependencyInjection\ContainerInterface;
+ 
+ /**
+  * Class MappingAdminForm.
+@@ -12,6 +15,35 @@ use Drupal\Component\Utility\Html;
+  * @package Drupal\age_checker\Form
+  */
+ class MappingAdminForm extends ConfigFormBase {
++  /** The Key/Value Store to use for state.
++   *
++   * @var \Drupal\Core\State\StateInterface
++   * @var \Drupal\Core\Config\ConfigFactoryInterface
++   */
++
++  protected  $configFactory;
++  protected $state;
++
++  /**
++   * Constructs \Drupal\tint\Plugin\Derivative\TintEmbedBlockDerivative object.
++   *
++   * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
++   *   The config factory.
++   * @param \Drupal\Core\State\StateInterface $state
++   *   The state keyvalue store.
++   */
++
++  public function __construct(ConfigFactoryInterface $configFactory, StateInterface $state) {
++    parent::__construct($configFactory);
++    $this->state = $state;
++  }
++
++  public static function create(ContainerInterface $container) {
++    return new static(
++      $container->get('config.factory'),
++      $container->get('state')
++    );
++  }
+ 
+   /**
+    * {@inheritdoc}
+@@ -34,11 +66,11 @@ class MappingAdminForm extends ConfigFormBase {
+    */
+   public function buildForm(array $form, FormStateInterface $form_state) {
+ 
++    $result = [];
+     $config = $this->config('age_checker_mapping.settings');
+-    $default_settings = \Drupal::config('age_checker.settings');
+ 
+     $form = array();
+-    $languages = \Drupal::state()->get('age_checker_language', 'Please provide values');
++    $languages = $this->state->get('age_checker_language', 'Please provide values');
+     $languages = explode("\n", $languages);
+ 
+     foreach ($languages as $language) {
+@@ -53,7 +85,7 @@ class MappingAdminForm extends ConfigFormBase {
+       $language = $language[0];
+ 
+       // Field for selecting the country for a particular language.
+-      $countries = \Drupal::state()->get('age_checker_countries') ? (\Drupal::state()->get('age_checker_countries')) : \Drupal::config('age_checker.settings')->get('age_checker_countries');
++      $countries = $this->state->get('age_checker_countries') ? ($this->state->get('age_checker_countries')) : $this->config('age_checker.settings')->get('age_checker_countries');
+ 
+       $countries = explode("\n", $countries);
+       $country_options = array();
+@@ -110,7 +142,7 @@ class MappingAdminForm extends ConfigFormBase {
+         '#title' => t('Blank Error Message'),
+         '#required' => TRUE,
+         '#maxlength' => 255,
+-        '#default_value' => $config->get('age_checker_' . $language . '_blank_error_msg') ? $config->get('age_checker_' . $language . '_blank_error_msg') : $default_settings->get('age_checker_blank_error_msg'),
++        '#default_value' => $config->get('age_checker_' . $language . '_blank_error_msg') ? $config->get('age_checker_' . $language . '_blank_error_msg') : $config->get('age_checker_blank_error_msg'),
+         '#description' => t('Enter a helpful and user-friendly message.'),
+       );
+ 
+@@ -120,7 +152,7 @@ class MappingAdminForm extends ConfigFormBase {
+         '#title' => t('Incorrect Date Format Message'),
+         '#required' => TRUE,
+         '#maxlength' => 255,
+-        '#default_value' => $config->get('age_checker_' . $language . '_dateformat_error_msg') ? $config->get('age_checker_' . $language . '_dateformat_error_msg') : $default_settings->get('age_checker_dateformat_error_msg'),
++        '#default_value' => $config->get('age_checker_' . $language . '_dateformat_error_msg') ? $config->get('age_checker_' . $language . '_dateformat_error_msg') : $config->get('age_checker_dateformat_error_msg'),
+         '#description' => t('Enter a helpful and user-friendly message.'),
+       );
+       // Date Out of Range Validation Message.
+@@ -129,7 +161,7 @@ class MappingAdminForm extends ConfigFormBase {
+         '#title' => t('Date Out Of Range Message'),
+         '#required' => TRUE,
+         '#maxlength' => 255,
+-        '#default_value' => $config->get('age_checker_' . $language . '_daterange_error_msg') ? $config->get('age_checker_' . $language . '_daterange_error_msg') : $default_settings->get('age_checker_daterange_error_msg'),
++        '#default_value' => $config->get('age_checker_' . $language . '_daterange_error_msg') ? $config->get('age_checker_' . $language . '_daterange_error_msg') : $config->get('age_checker_daterange_error_msg'),
+         '#description' => t('Enter a helpful and user-friendly message.'),
+       );
+ 
+@@ -139,7 +171,7 @@ class MappingAdminForm extends ConfigFormBase {
+         '#title' => t('Under Age Validation Message'),
+         '#required' => TRUE,
+         '#maxlength' => 255,
+-        '#default_value' => $config->get('age_checker_' . $language . '_underage_error_msg') ? $config->get('age_checker_' . $language . '_underage_error_msg') : $default_settings->get('age_checker_underage_error_msg'),
++        '#default_value' => $config->get('age_checker_' . $language . '_underage_error_msg') ? $config->get('age_checker_' . $language . '_underage_error_msg') : $config->get('age_checker_underage_error_msg'),
+         '#description' => t('Enter a helpful and user-friendly message.'),
+       );
+ 
+@@ -149,7 +181,7 @@ class MappingAdminForm extends ConfigFormBase {
+         '#title' => t('Remember Me Text'),
+         '#maxlength' => 255,
+         '#required' => FALSE,
+-        '#default_value' => $config->get('age_checker_' . $language . '_remember_me_text') ? $config->get('age_checker_' . $language . '_remember_me_text') : $default_settings->get('age_checker_remember_me_text'),
++        '#default_value' => $config->get('age_checker_' . $language . '_remember_me_text') ? $config->get('age_checker_' . $language . '_remember_me_text') : $config->get('age_checker_remember_me_text'),
+         '#description' => t('Please enter the remember me text.'),
+       );
+ 
+@@ -159,7 +191,7 @@ class MappingAdminForm extends ConfigFormBase {
+         '#title' => t('Label of submit button'),
+         '#maxlength' => 50,
+         '#required' => TRUE,
+-        '#default_value' => $config->get('age_checker_' . $language . '_button_text') ? $config->get('age_checker_' . $language . '_button_text') : $default_settings->get('age_checker_button_text'),
++        '#default_value' => $config->get('age_checker_' . $language . '_button_text') ? $config->get('age_checker_' . $language . '_button_text') : $config->get('age_checker_button_text'),
+         '#description' => t('Please enter submit button text.'),
+       );
+ 
+@@ -178,7 +210,6 @@ class MappingAdminForm extends ConfigFormBase {
+       $form[$language . '_mapping']['age_checker_' . $language . '_copyright'] = array(
+         '#type' => 'text_format',
+         '#title' => t('Copyright text'),
+-        '#description' => t('This field is used for the footer copyright text.'),
+         '#rows' => 6,
+         '#default_value' => isset($copyright_text['value']) ? $copyright_text['value'] : '',
+         '#description' => t('Copyright © 2015 Brand name. All rights reserved'),
+@@ -196,24 +227,24 @@ class MappingAdminForm extends ConfigFormBase {
+ 
+     $values = $form_state->getValues();
+     $config = $this->config('age_checker_mapping.settings');
+-    $languages = \Drupal::state()->get('age_checker_language', 'Please provide values');
++    $languages = $this->state->get('age_checker_language', 'Please provide values');
+     $languages = explode("\n", $languages);
+     foreach ($languages as $language) {
+       $language = explode('|', $language);
+       $language = array_map('trim', $language);
+       $language = $language[0];
+ 
+-      \Drupal::state()->set('age_checker_' . $language . '_country_list', $values['age_checker_' . $language . '_country_list']);
+-      \Drupal::state()->set('age_checker_' . $language . '_age_gate_header', $values['age_checker_' . $language . '_age_gate_header']);
+-      \Drupal::state()->set('age_checker_' . $language . '_age_gate_footer', $values['age_checker_' . $language . '_age_gate_footer']);
+-      \Drupal::state()->set('age_checker_' . $language . '_blank_error_msg', $values['age_checker_' . $language . '_blank_error_msg']);
+-      \Drupal::state()->set('age_checker_' . $language . '_dateformat_error_msg', $values['age_checker_' . $language . '_dateformat_error_msg']);
+-      \Drupal::state()->set('age_checker_' . $language . '_daterange_error_msg', $values['age_checker_' . $language . '_daterange_error_msg']);
+-      \Drupal::state()->set('age_checker_' . $language . '_underage_error_msg', $values['age_checker_' . $language . '_underage_error_msg']);
+-      \Drupal::state()->set('age_checker_' . $language . '_remember_me_text', $values['age_checker_' . $language . '_remember_me_text']);
+-      \Drupal::state()->set('age_checker_' . $language . '_button_text', $values['age_checker_' . $language . '_button_text']);
+-      \Drupal::state()->set('age_checker_' . $language . '_footer_links', $values['age_checker_' . $language . '_footer_links']);
+-      \Drupal::state()->set('age_checker_' . $language . '_copyright', $values['age_checker_' . $language . '_copyright']);
++      $this->state->set('age_checker_' . $language . '_country_list', $values['age_checker_' . $language . '_country_list']);
++      $this->state->set('age_checker_' . $language . '_age_gate_header', $values['age_checker_' . $language . '_age_gate_header']);
++      $this->state->set('age_checker_' . $language . '_age_gate_footer', $values['age_checker_' . $language . '_age_gate_footer']);
++      $this->state->set('age_checker_' . $language . '_blank_error_msg', $values['age_checker_' . $language . '_blank_error_msg']);
++      $this->state->set('age_checker_' . $language . '_dateformat_error_msg', $values['age_checker_' . $language . '_dateformat_error_msg']);
++      $this->state->set('age_checker_' . $language . '_daterange_error_msg', $values['age_checker_' . $language . '_daterange_error_msg']);
++      $this->state->set('age_checker_' . $language . '_underage_error_msg', $values['age_checker_' . $language . '_underage_error_msg']);
++      $this->state->set('age_checker_' . $language . '_remember_me_text', $values['age_checker_' . $language . '_remember_me_text']);
++      $this->state->set('age_checker_' . $language . '_button_text', $values['age_checker_' . $language . '_button_text']);
++      $this->state->set('age_checker_' . $language . '_footer_links', $values['age_checker_' . $language . '_footer_links']);
++      $this->state->set('age_checker_' . $language . '_copyright', $values['age_checker_' . $language . '_copyright']);
+ 
+       $this->config('age_checker_mapping.settings')
+         ->set('age_checker_' . $language . '_select_list_label', $values['age_checker_' . $language . '_select_list_label'])
+diff --git a/src/Form/SettingsForm.php b/src/Form/SettingsForm.php
+index 50e85ec..d08965b 100644
+--- a/src/Form/SettingsForm.php
++++ b/src/Form/SettingsForm.php
+@@ -2,16 +2,50 @@
+ 
+ namespace Drupal\age_checker\Form;
+ 
++use Drupal\Core\Config\ConfigFactoryInterface;
++use Drupal\Core\Config\ConfigFactoryOverrideInterface;
+ use Drupal\Core\Form\ConfigFormBase;
+ use Drupal\Core\Form\FormStateInterface;
++use Drupal\Core\State\StateInterface;
+ use Drupal\Core\Url;
++use Drupal\Core\Link;
++use Symfony\Component\DependencyInjection\ContainerInterface;
++
+ 
+ /**
+  * Class SettingsForm.
+  *
+  * @package Drupal\age_checker\Form
+  */
+-class SettingsForm extends ConfigFormBase {
++class SettingsForm extends ConfigFormBase implements ConfigFactoryInterface{
++  /** The Key/Value Store to use for state.
++   *
++   * @var \Drupal\Core\State\StateInterface
++   * @var \Drupal\Core\Config\ConfigFactoryInterface
++   */
++
++  protected $state;
++
++  /**
++   * Constructs \Drupal\tint\Plugin\Derivative\TintEmbedBlockDerivative object.
++   *
++   * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
++   *   The config factory.
++   * @param \Drupal\Core\State\StateInterface $state
++   *   The state keyvalue store.
++   */
++
++  public function __construct(ConfigFactoryInterface $configFactory, StateInterface $state) {
++    parent::__construct($configFactory);
++    $this->state = $state;
++  }
++
++  public static function create(ContainerInterface $container) {
++    return new static(
++      $container->get('config.factory'),
++      $container->get('state')
++    );
++  }
+ 
+   /**
+    * {@inheritdoc}
+@@ -78,7 +112,7 @@ class SettingsForm extends ConfigFormBase {
+       '#collapsed'     => TRUE,
+     );
+ 
+-    $url = Url::fromUri('http://www.worldatlas.com/aatlas/ctycodes.htm');
++    $url = Url::fromUri('http://www.worldatlas.com/aatlas/ctycodes.htm')->toString();
+     $link_options = array(
+       'attributes' => array(
+         'class' => array(
+@@ -87,7 +121,7 @@ class SettingsForm extends ConfigFormBase {
+       ),
+     );
+     $url->setOptions($link_options);
+-    $link = \Drupal::l(t('http://www.worldatlas.com/aatlas/ctycodes.htm'), $url);
++    $link = Link::fromTextAndUrl(t('http://www.worldatlas.com/aatlas/ctycodes.htm'), $url)->toString();
+ 
+     $form['country']['age_checker_countries'] = array(
+       '#type' => 'textarea',
+@@ -112,7 +146,6 @@ class SettingsForm extends ConfigFormBase {
+       '#type' => 'textfield',
+       '#field_suffix' => t('Days'),
+       '#size' => 6,
+-      '#element_validate' => array('element_validate_integer'),
+       '#default_value' => $config->get('age_checker_cookie_expiration_time'),
+       '#description' => t('The number of days before the cookie set by age checker module expires, and the user must verify their age again (0 days will expire at end of session).'),
+     );
+@@ -180,6 +213,8 @@ class SettingsForm extends ConfigFormBase {
+    * {@inheritdoc}
+    */
+   public function validateForm(array &$form, FormStateInterface $form_state) {
++    $countries_list = [];
++    $language_list = [];
+ 
+     // Validation for countries.
+     $countries = $form_state->getValue('age_checker_countries');
+@@ -223,16 +258,16 @@ class SettingsForm extends ConfigFormBase {
+   public function submitForm(array &$form, FormStateInterface $form_state) {
+     // Set values in variables.
+     $values = $form_state->getValues();
+-    \Drupal::state()->set('age_checker_option_remember_me', $values['age_checker_option_remember_me']);
+-    \Drupal::state()->set('age_checker_country_code_url', $values['age_checker_country_code_url']);
+-    \Drupal::state()->set('age_checker_language', $values['age_checker_language']);
+-    \Drupal::state()->set('age_checker_countries', $values['age_checker_countries']);
+-    \Drupal::state()->set('age_checker_cookie_expiration_time', $values['age_checker_cookie_expiration_time']);
+-    \Drupal::state()->set('age_checker_under_age_url', $values['age_checker_under_age_url']);
+-    \Drupal::state()->set('age_checker_visibility', $values['age_checker_visibility']);
+-    \Drupal::state()->set('age_checker_pages', $values['age_checker_pages']);
+-    \Drupal::state()->set('age_checker_background_image', $values['age_checker_background_image']);
+-    \Drupal::state()->set('age_checker_logo', $values['age_checker_logo']);
++    $this->state->set('age_checker_option_remember_me', $values['age_checker_option_remember_me']);
++    $this->state->set('age_checker_country_code_url', $values['age_checker_country_code_url']);
++    $this->state->set('age_checker_language', $values['age_checker_language']);
++    $this->state->set('age_checker_countries', $values['age_checker_countries']);
++    $this->state->set('age_checker_cookie_expiration_time', $values['age_checker_cookie_expiration_time']);
++    $this->state->set('age_checker_under_age_url', $values['age_checker_under_age_url']);
++    $this->state->set('age_checker_visibility', $values['age_checker_visibility']);
++    $this->state->set('age_checker_pages', $values['age_checker_pages']);
++    $this->state->set('age_checker_background_image', $values['age_checker_background_image']);
++    $this->state->set('age_checker_logo', $values['age_checker_logo']);
+ 
+     $this->config('age_checker.settings')
+       ->set('age_checker_option_remember_me', $values['age_checker_option_remember_me'])
+@@ -249,4 +284,128 @@ class SettingsForm extends ConfigFormBase {
+     parent::submitForm($form, $form_state);
+   }
+ 
++  /**
++   * Returns an immutable configuration object for a given name.
++   *
++   * @param string $name
++   *   The name of the configuration object to construct.
++   *
++   * @return \Drupal\Core\Config\ImmutableConfig
++   *   A configuration object.
++   */
++  public function get($name) {
++    // TODO: Implement get() method.
++  }
++
++  /**
++   * Returns an mutable configuration object for a given name.
++   *
++   * Should not be used for config that will have runtime effects. Therefore it
++   * is always loaded override free.
++   *
++   * @param string $name
++   *   The name of the configuration object to construct.
++   *
++   * @return \Drupal\Core\Config\Config
++   *   A configuration object.
++   */
++  public function getEditable($name) {
++    // TODO: Implement getEditable() method.
++  }
++
++  /**
++   * Returns a list of configuration objects for the given names.
++   *
++   * This will pre-load all requested configuration objects does not create
++   * new configuration objects. This method always return immutable objects.
++   * ConfigFactoryInterface::getEditable() should be used to retrieve mutable
++   * configuration objects, one by one.
++   *
++   * @param array $names
++   *   List of names of configuration objects.
++   *
++   * @return \Drupal\Core\Config\ImmutableConfig[]
++   *   List of successfully loaded configuration objects, keyed by name.
++   */
++  public function loadMultiple(array $names) {
++    // TODO: Implement loadMultiple() method.
++  }
++
++  /**
++   * Resets and re-initializes configuration objects. Internal use only.
++   *
++   * @param string|null $name
++   *   (optional) The name of the configuration object to reset. If omitted, all
++   *   configuration objects are reset.
++   *
++   * @return $this
++   */
++  public function reset($name = NULL) {
++    // TODO: Implement reset() method.
++  }
++
++  /**
++   * Renames a configuration object using the storage.
++   *
++   * @param string $old_name
++   *   The old name of the configuration object.
++   * @param string $new_name
++   *   The new name of the configuration object.
++   *
++   * @return $this
++   */
++  public function rename($old_name, $new_name) {
++    // TODO: Implement rename() method.
++  }
++
++  /**
++   * The cache keys associated with the state of the config factory.
++   *
++   * All state information that can influence the result of a get() should be
++   * included. Typically, this includes a key for each override added via
++   * addOverride(). This allows external code to maintain caches of
++   * configuration data in addition to or instead of caches maintained by the
++   * factory.
++   *
++   * @return array
++   *   An array of strings, used to generate a cache ID.
++   */
++  public function getCacheKeys() {
++    // TODO: Implement getCacheKeys() method.
++  }
++
++  /**
++   * Clears the config factory static cache.
++   *
++   * @return $this
++   */
++  public function clearStaticCache() {
++    // TODO: Implement clearStaticCache() method.
++  }/**
++ * Gets configuration object names starting with a given prefix.
++ *
++ * @param string $prefix
++ *   (optional) The prefix to search for. If omitted, all configuration object
++ *   names that exist are returned.
++ *
++ * @return array
++ *   An array containing matching configuration object names.
++ * @see \Drupal\Core\Config\StorageInterface::listAll()
++ *
++ */
++  public function listAll($prefix = '') {
++    // TODO: Implement listAll() method.
++  }
++
++  /**
++   * Adds config factory override services.
++   *
++   * @param \Drupal\Core\Config\ConfigFactoryOverrideInterface $config_factory_override
++   *   The config factory override service to add. It is added at the end of the
++   *   priority list (lower priority relative to existing ones).
++   */
++  public function addOverride(ConfigFactoryOverrideInterface $config_factory_override) {
++    // TODO: Implement addOverride() method.
++  }
++
+ }

@@ -1,0 +1,30 @@
+age_checker.admin_config:
+  path: '/admin/config/people/age-checker'
+  defaults:
+    _form: '\Drupal\age_checker\Form\SettingsForm'
+    _title: 'Age Checker Settings'
+  requirements:
+    _permission: 'administer age checker settings'
+
+age_checker.mapping:
+  path: '/admin/config/people/age-checker/mapping'
+  defaults:
+    _form: '\Drupal\age_checker\Form\MappingAdminForm'
+    _title: 'Language and Country Mapping'
+  requirements:
+    _permission: 'administer age checker settings'
+
+age_checker.country_config:
+  path: '/admin/config/people/age-checker/country_configuration'
+  defaults:
+    _form: '\Drupal\age_checker\Form\CountryConfig'
+    _title: 'Country Configuration'
+  requirements:
+    _permission: 'administer age checker settings'
+
+age_checker.agegate:
+  path: '/age-gate'
+  defaults:
+    _controller: '\Drupal\age_checker\Controller\AgeCheckerAgeGate::ageCheckerTemplate'
+  requirements:
+    _access: 'TRUE'

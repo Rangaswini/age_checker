@@ -1,0 +1,11 @@
+age_checker.admin:
+  version: 8.x
+  css:
+    theme:
+      css/age_checker.css: {}
+  js:
+    js/age_checker.js: {}
+  dependencies:
+    - core/jquery
+    - core/drupal
+    - core/drupalSettings

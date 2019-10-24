@@ -1,0 +1,278 @@
+<?php
+
+/**
+ * @file
+ * Displays an age gate for users before to access the site.
+ */
+
+use GuzzleHttp\Exception\RequestException;
+use Drupal\Component\Serialization\Json;
+use Drupal\age_checker\Controller\AgeCheckerAgeGate;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Drupal\age_checker\EventSubscriber\AgeCheckerSubscriber;
+use Drupal\Core\Url;
+
+if (!defined('AGE_CHECKER_VISIBILITY_NOTLISTED')) {
+  define('AGE_CHECKER_VISIBILITY_NOTLISTED', 0);
+}
+if (!defined('AGE_CHECKER_VISIBILITY_LISTED')) {
+  define('AGE_CHECKER_VISIBILITY_LISTED', 1);
+}
+
+/**
+ * This function creates a proper theme for age gate to display UI friendly.
+ */
+function age_checker_theme() {
+  $age_checker_footer_links = array();
+  $age_checker_copyright = array();
+  $default_settings = \Drupal::config('age_checker.settings');
+
+  $languages = \Drupal::state()->get('age_checker_language');
+  $languages = $languages ? $languages : $default_settings->get('age_checker_language');
+  $languages = explode("\n", $languages);
+  foreach ($languages as $language) {
+    $language = explode('|', $language);
+    $language = array_map('trim', $language);
+    $language = $language[0];
+
+    $age_checker_footer_links[] = \Drupal::state()->get('age_checker_' . $language . '_footer_links');
+    $age_checker_copyright[] = \Drupal::state()->get('age_checker_' . $language . '_copyright');
+
+  }
+
+  $age_checker_footer_links_count = count($age_checker_footer_links);
+  return array(
+    'age_checker' => array(
+      'variables' => array(
+        'age_checker_header_message' => NULL,
+        'age_checker_form' => NULL,
+        'age_checker_footer_message' => NULL,
+      ),
+    ),
+    'age_checker_page' => array(
+      'render element' => 'page',
+      'variables' => array(
+        'age_checker_background_img' => NULL,
+        'age_checker_logo' => NULL,
+        'age_checker_footer_links' => NULL,
+        'age_checker_copyright' => NULL,
+        'age_checker_footer_links_count' => $age_checker_footer_links_count,
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme_suggestion_HOOK_alter.
+ */
+function age_checker_theme_suggestions_page_alter(array &$suggestions, array $variables, $hook) {
+  $internal_path = Url::fromRoute('<current>')->getInternalPath();
+  if($internal_path == 'age-gate') {
+    $suggestions[] = 'age_checker_' . $hook;
+  }
+}
+
+/**
+ * Implements hook_page_attachments().
+ */
+function age_checker_page_attachments(array &$attachments) {
+  $attachments['#attached']['library'][] = 'age_checker/age_checker.admin';
+
+  $user = \Drupal::currentUser();
+  global $base_url;
+
+  $default_settings = \Drupal::config('age_checker.settings');
+  $current_path = \Drupal::service('path.current')->getPath();
+  $is_front = \Drupal::service('path.matcher')->isFrontPage();
+  $request_path = \Drupal::request()->getRequestUri();
+
+  $destination = ($current_path == '/age-gate') ? $request_path : $current_path;
+
+  $age_gate_cookie = isset($_COOKIE['age_checker']) ? $_COOKIE['age_checker'] : 0;
+  $remember_me_cookie = isset($_COOKIE['remember_me']) ? $_COOKIE['remember_me'] : 0;
+
+  // Setting up cookie in case of logged in users.
+  if ($user->id() > 0) {
+    setcookie('age_checker', 1, 0, $GLOBALS['base_path'], NULL, FALSE, TRUE);
+  } else {
+    if ((($age_gate_cookie != 1) && ($remember_me_cookie != 1)) || $current_path == '/age-gate') {
+      if (AgeCheckerSubscriber::ageCheckerShowAgeGate()) {
+        $visibility = \Drupal::state()
+          ->get('age_checker_visibility', AGE_CHECKER_VISIBILITY_NOTLISTED);
+        $pages = \Drupal::state()->get('age_checker_pages', '');
+        $verify = FALSE;
+
+        // Determine if this page should be behind age checker.
+        $path_alias = \Drupal::service('path.alias_manager')
+          ->getAliasByPath($current_path, $pages);
+        switch ($visibility) {
+          case AGE_CHECKER_VISIBILITY_NOTLISTED:
+            if (!(\Drupal::service('path.matcher')
+              ->matchPath($path_alias, $pages))
+            ) {
+              $verify = TRUE;
+            }
+            break;
+
+          case AGE_CHECKER_VISIBILITY_LISTED:
+            if (\Drupal::service('path.matcher')
+              ->matchPath($path_alias, $pages)
+            ) {
+              $verify = TRUE;
+            }
+            break;
+        }
+
+        if ($verify) {
+          if ($current_path != '/age-gate') {
+            if (!function_exists('drush_main')) {
+              $url = Url::fromRoute('age_checker.agegate')->toString();
+              $response = new RedirectResponse($url);
+              $response->send();
+              return;
+            }
+          }
+          else {
+            // Disable caching for agegate page.
+            // drupal_page_is_cacheable(FALSE);
+            // Default country.
+            $selected_country = isset($_COOKIE['country_selected']) ? $_COOKIE['country_selected'] : age_checker_get_country_name();
+
+            if ($destination == '/age-gate' || $destination == '/node' || $is_front || (($current_path == '/age-gate') && ($destination == ''))) {
+              if (\Drupal::moduleHandler()->moduleExists('locale')) {
+                $destination = \Drupal::state()
+                  ->get('age_checker_' . $selected_country . '_redirect_link');
+              }
+              else {
+                $destination = $base_url;
+              }
+            }
+            else {
+              $destination = $base_url . '/' . $destination;
+            }
+
+            // Getting the language_code.
+            $language_code = AgeCheckerAgeGate::ageCheckerGetLanguageCode();
+
+            // Auto Tab.
+            $day_weight = \Drupal::state()
+              ->get('age_checker_' . $selected_country . '_day_weight');
+            $month_weight = \Drupal::state()
+              ->get('age_checker_' . $selected_country . '_month_weight');
+            $year_weight = \Drupal::state()
+              ->get('age_checker_' . $selected_country . '_year_weight');
+
+            $combine_array = array($day_weight, $month_weight, $year_weight);
+
+            asort($combine_array);
+
+            $i = 0;
+            foreach ($combine_array as $key => $value) {
+              $id[$i] = age_checker_get_id($key);
+              $i++;
+            }
+
+            // Add module variables to JS.
+            $age_checker_variables = array(
+              'cookie_expiration' => \Drupal::state()->get('age_checker_cookie_expiration_time', 15),
+              'currentdate' => date("Y/m/d", time()),
+              'threshold_age' => \Drupal::state()->get('age_checker_' . $selected_country . '_threshold_ages'),
+              'redirecturl' => \Drupal::state()->get('age_checker_under_age_url', '/'),
+              'blank_err_message' => \Drupal::state()->get('age_checker_' . $language_code . '_blank_error_msg', ''),
+              'dateformat_error' => \Drupal::state()->get('age_checker_' . $language_code . '_dateformat_error_msg', ''),
+              'under_age_err_msg' => \Drupal::state()->get('age_checker_' . $language_code . '_underage_error_msg', '') ? \Drupal::state()->get('age_checker_' . $language_code . '_underage_error_msg', '') : $default_settings->get('age_checker_underage_error_msg'),
+              'date_range_err_msg' => \Drupal::state()->get('age_checker_' . $language_code . '_daterange_error_msg', ''),
+              'destination' => $destination,
+              // 'verify' => $verify,
+              'day_placeholder' => \Drupal::state()->get('age_checker_' . $selected_country . '_day_placeholder'),
+              'month_placeholder' => \Drupal::state()->get('age_checker_' . $selected_country . '_month_placeholder'),
+              'year_placeholder' => \Drupal::state()->get('age_checker_' . $selected_country . '_year_placeholder'),
+              'id_1' => $id[0],
+              'id_2' => $id[1],
+              'id_3' => $id[2],
+
+            );
+            $attachments['#attached']['drupalSettings']['age_checker'] = $age_checker_variables;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Get the country name for Age Gate.
+ */
+function age_checker_get_country_name() {
+   $country_name = '';
+  // Get the country code.
+  $country_code = age_checker_get_country_code();
+  // Get the default country.
+  $default_country = \Drupal::state()->get('age_checker_default_country');
+  $countries = \Drupal::state()->get('age_checker_countries', '');
+  $countries = explode("\n", $countries);
+  foreach ($countries as $country) {
+    $country_array = explode('|', $country);
+    if (trim($country_array[0]) == $country_code) {
+      $country_name = $country_code;
+      break;
+    }
+    else {
+      $country_name = $default_country;
+    }
+  }
+  return $country_name;
+}
+
+/**
+ * Get the country code.
+ */
+function age_checker_get_country_code() {
+
+  $ip_address = Drupal::request()->getClientIp();
+  $age_checker_country_code_url = \Drupal::state()->get('age_checker_country_code_url', 'http://geoip.nekudo.com/api/');
+  $url = $age_checker_country_code_url . $ip_address;
+  $geoip_data = age_checker_get_geoip_data($url);
+
+  if (is_array($geoip_data)) {
+    $country_code = $geoip_data['country']['code'];
+  }
+  else {
+    $country_code = \Drupal::state()->get('age_checker_default_country');
+  }
+  return $country_code;
+}
+
+/**
+ * Implements a function to get country name.
+ */
+function age_checker_get_geoip_data($url) {
+  $json_data = FALSE;
+  try {
+    $response = \Drupal::httpClient()->get($url, array('headers' => array('Accept' => 'text/plain')));
+    $data = (string) $response->getBody();
+    $json_data = Json::decode($data);
+    if (empty($json_data)) {
+      return FALSE;
+    }
+  }
+  catch (RequestException $e) {
+    return FALSE;
+  }
+  return $json_data;
+}
+
+/**
+ * Get the ID for date element.
+ */
+function age_checker_get_id($key) {
+  if ($key == 0) {
+    return "#age_checker_day";
+  }
+  elseif ($key == 1) {
+    return "#age_checker_month";
+  }
+  else {
+    return "#age_checker_year";
+  }
+}

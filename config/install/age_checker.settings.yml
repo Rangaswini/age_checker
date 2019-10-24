@@ -1,0 +1,25 @@
+age_checker_option_remember_me: 0
+age_checker_country_code_url: 'http://geoip.nekudo.com/api/'
+age_checker_language: 'en|English'
+age_checker_countries: 'IN|India'
+age_checker_cookie_expiration_time: '15'
+age_checker_under_age_url: ''
+age_checker_visibility: 0
+age_checker_pages: 'admin/*'
+age_checker_background_image: ''
+age_checker_logo: ''
+age_checker_select_list_label: 'Select your country'
+age_checker_blank_error_msg: 'Date field can not be blank.'
+age_checker_dateformat_error_msg: 'Please enter your date of birth in correct format.'
+age_checker_daterange_error_msg: 'Please enter your date of birth in valid date range.'
+age_checker_underage_error_msg: 'Sorry, you are Under age limit and are prohibited from entering this site!'
+age_checker_remember_me_text: 'Remember my details (Do not select on shared computers)'
+age_checker_button_text: 'Submit'
+age_checker_footer_links: ''
+age_checker_threshold_ages: 18
+age_checker_day_weight: 1
+age_checker_month_weight: 2
+age_checker_year_weight: 3
+age_checker_day_placeholder: 'DD'
+age_checker_month_placeholder: 'MM'
+age_checker_year_placeholder: 'YYYY'

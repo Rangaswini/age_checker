@@ -1,0 +1,6 @@
+services:
+  age_checker.subscriber:
+    class: Drupal\age_checker\EventSubscriber\AgeCheckerSubscriber
+    arguments: ['@current_user']
+    tags:
+      - { name: 'event_subscriber' }

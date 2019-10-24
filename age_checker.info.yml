@@ -1,0 +1,6 @@
+name: Age Gate1
+type: module
+description: "This module will provide an age gate for the sites."
+package: Age Gate
+core: 8.x
+configure: age_checker.admin_config

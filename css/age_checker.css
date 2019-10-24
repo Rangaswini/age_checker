@@ -1,0 +1,306 @@
+#age_checker li.expanded,
+#age_checker li.collapsed,
+#age_checker li.leaf {
+  padding: 0.2em 0 0 0;
+  margin: 0;
+}
+
+#age_checker ::-webkit-input-placeholder {
+  color: #fff;
+}
+
+#age_checker :-moz-placeholder { /* Firefox 18- */
+  color: #fff;
+}
+
+#age_checker ::-moz-placeholder {  /* Firefox 19+ */
+  color: #fff;
+}
+
+#age_checker :-ms-input-placeholder {
+  color: #fff;
+}
+
+#age_checker {
+  height: 100%;
+  background-size: 100% 100%;
+  font-family: "Open Sans",Helvetica,Arial,sans-serif;
+  display: table;
+  width: 100%;
+}
+
+#age_checker .logo {
+  text-align: center;
+}
+
+#age_checker .region-footer {
+  text-align: center;
+}
+
+#age_checker .region-footer .content {
+  margin-top: 0;
+}
+
+#age_checker .agegate-container {
+  background-color: #1b8ec4;
+  border: none;
+  width: 510px;
+  height: 80%;
+  max-height: 485px;
+  margin: -50px auto 0 auto;
+  padding: 0 20px;
+}
+
+#age_checker_header_message {
+  font-size: 14px;
+  color: #fff;
+  font-family: Helvetica, Arial, sans-serif;
+  text-align: center;
+  line-height: 1.25;
+  letter-spacing: 0.3px;
+  padding: 50px 30px 10px 30px;
+  margin: 0 auto;
+  display: block;
+}
+
+#age_checker_widget {
+  margin: auto;
+  text-align: center;
+}
+
+#age_checker .form-item {
+  margin-bottom: 2px !important;
+}
+
+
+#age_checker .form-item-month,
+#age_checker .form-item-year,
+#age_checker .form-item-day {
+  display: inline-block;
+  padding: 4px;
+}
+
+#age_checker .form-item-day input,
+#age_checker .form-item-month input {
+  width: 110px;
+}
+
+#age_checker .form-item-year input {
+  width: 175px;
+}
+
+#age_checker .form-item-day input,
+#age_checker .form-item-month input,
+#age_checker .form-item-year input {
+  background-color: #1b8ec4;
+  color: #fff;
+  border: solid 2px #fff !important;
+  border-radius: 10px;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.075) inset;
+  display: inline-block;
+  font-size: 55px;
+  height: 112px;
+  line-height: 112px;
+  font-weight: 900;
+  text-align: center;
+  padding: 0 8px;
+  font-family: Helvetica, Arial, sans-serif;
+}
+
+#age_checker .form-item-list-of-countries label {
+  font-family: Helvetica, Arial, sans-serif;
+  text-align: center;
+  line-height: 1.25;
+  letter-spacing: 0.3px;
+  font-size: 14px;
+  color: #fff;
+}
+
+#age_checker .form-item-list-of-countries select {
+  background: #1b8ec4;
+  height: 52px;
+  width: 335px;
+  padding: 12px;
+  line-height: 1;
+  border: 2px solid #fff !important;
+  border-radius: 10px;
+  -webkit-appearance: none;
+  font-size: 16px;
+  color: #fff;
+  font-weight: bold;
+  vertical-align: middle;
+}
+
+#age_checker .form-item-remember-me label {
+  padding-left: 10px;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  vertical-align: middle;
+  cursor: pointer;
+  height: 22px;
+  padding-top: 3px;
+  letter-spacing: -0.2px;
+  width: 300px;
+  text-align: left;
+  color: #fff;
+  font-size: 14px;
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 900;
+}
+
+#age_checker #edit-submit {
+  height: 50px;
+  margin-top: 12px;
+  padding-top: 8px;
+  width: 305px;
+  background: #f8e514;
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-shadow: none;
+  border: none;
+  min-width: 265px;
+  margin: 10px 10px 0px 10px;
+  text-align: center;
+  display: inline-block;
+  padding: 4px;
+  -webkit-appearance: button;
+  cursor: pointer;
+}
+
+#age_checker_footer_message {
+  font-family: Helvetica, Arial, sans-serif;
+  text-align: center;
+  line-height: 1.25;
+  color: #fff;
+  letter-spacing: 0px;
+  font-size: 11px;
+  padding: 5px 30px;
+}
+
+/******************* Responsive theming ***************
+I have written media query for only those screen where
+width of the screen is smaller than the fixed width of
+the container div of agegate
+*******************************************************/
+
+@media screen and (max-width: 550px) {
+  #age_checker .agegate-container {
+    width: 96%;
+    padding: 2%;
+  }
+  #age_checker_header_message {
+    font-size: 12px;
+    padding: 50px 10px 5px 10px;
+  }
+  #age_checker .form-item-day input,
+  #age_checker .form-item-month input {
+    width: 60px;
+  }
+
+  #age_checker .form-item-year input {
+    width: 100px;
+  }
+
+  #age_checker .form-item-day input,
+  #age_checker .form-item-month input,
+  #age_checker .form-item-year input {
+    font-size: 30px;
+    height: 60px;
+    line-height: 60px;
+    font-weight: 500;
+    padding: 0 4px;
+  }
+  #age_checker .form-item-list-of-countries label {
+    font-size: 12px;
+  }
+  #age_checker .form-item-list-of-countries select {
+    background: transparent;
+    height: 32px;
+    width: 160px;
+    padding: 6px;
+    font-size: 12px;
+  }
+
+  #age_checker .form-item-remember-me label {
+    height: 22px;
+    width: 150px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  #age_checker #edit-submit {
+    height: 30px;
+    width: 150px;
+    margin: 5px 5px 0px 5px;
+    padding: 4px;
+  }
+
+  #age_checker_footer_message {
+    padding: 5px 10px;
+  }
+}
+
+.agegate-container-footer {
+  background: #fff;
+  position: fixed;
+  width: 100%;
+  bottom: 0;
+}
+
+.agegate-footer {
+  background-color: #f8e514;
+  border-top: solid 2px white;
+  font-weight: 600;
+  width: 100%;
+}
+
+.agegatelinks-menu {
+  width: 80%;
+  margin: 0 auto;
+  text-align: center;
+  padding: 5px;
+}
+
+ul.agegatelinks-menu li.leaf {
+  list-style: none;
+  display: inline;
+}
+
+ul.agegatelinks-menu li.leaf a {
+  color: #000;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.agegate_copyright_text {
+  text-align: center;
+  font-weight: bold;
+  background: white;
+  padding: 5px;
+  width: 100%;
+}
+
+@media screen and (max-width: 550px) {
+  ul.agegatelinks-menu li.leaf a {
+    font-size: 11px;
+    font-weight: normal;
+  }
+  .agegatelinks-menu {
+    width: 100%;
+    padding: 5px 2px;
+  }
+  .agegate-container-footer {
+    position: relative;
+  }
+}
+
+@media screen and (max-width: 960px) {
+  .agegate-container-footer {
+    position: relative;
+  }
+}
+
+.sample_link {
+  font-weight: bold;
+}
